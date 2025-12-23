@@ -1,0 +1,13 @@
+﻿Flask
+
+gunicorn
+
+pandas
+
+numpy
+
+scikit-learn
+
+joblib
+
+Flask-Limiter

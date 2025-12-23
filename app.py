@@ -2,12 +2,11 @@ from flask import Flask, jsonify, request, render_template
 import pandas as pd
 import joblib
 import os
-
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 # -----------------------------
-# App config
+# App setup
 # -----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,9 +17,9 @@ app = Flask(
 )
 
 limiter = Limiter(
-    key_func=get_remote_address,
+    get_remote_address,
     app=app,
-    default_limits=["100 per minute"]  # relaxed for demo
+    default_limits=["60 per minute"]
 )
 
 # -----------------------------
@@ -31,8 +30,8 @@ CSV_FILE = os.path.join(BASE_DIR, "NCRB_Crime_Against_Childrens.csv")
 # -----------------------------
 # Globals
 # -----------------------------
-LAST_LOADED = 0
 df = None
+LAST_LOADED = 0
 
 model = None
 encoder = None
@@ -55,7 +54,7 @@ def load_models():
     max_total = joblib.load(os.path.join(BASE_DIR, "max_total.pkl"))
 
 # -----------------------------
-# Load CSV with auto reload
+# Load CSV
 # -----------------------------
 def load_csv():
     global df, LAST_LOADED
@@ -79,10 +78,7 @@ def load_csv():
     temp["total"] = temp["ipc"] + temp["sll"]
     temp["ipc_ratio"] = temp["ipc"] / (temp["total"] + 1)
     temp["sll_ratio"] = temp["sll"] / (temp["total"] + 1)
-    temp["crime_density"] = (
-        temp["total"] /
-        (temp.groupby("State")["total"].transform("mean") + 1)
-    )
+    temp["crime_density"] = temp["total"] / (temp.groupby("State")["total"].transform("mean") + 1)
 
     df = temp
     LAST_LOADED = mtime
@@ -109,48 +105,63 @@ def districts():
     return jsonify(sorted(d))
 
 @app.route("/predict", methods=["POST"])
-@limiter.limit("30 per minute")
+@limiter.limit("10 per minute")
 def predict():
-    load_models()
-    load_csv()
+    try:
+        load_models()
+        load_csv()
 
-    data = request.json or {}
-    state = data.get("state")
-    district = data.get("district")
+        data = request.get_json(force=True)
+        state = data.get("state")
+        district = data.get("district")
 
-    if not state or not district:
-        return jsonify({"error": "Please select both state and district"}), 400
+        if not state or not district:
+            return jsonify({"error": "Invalid input"}), 400
 
-    row = df[(df["State"] == state) & (df["District"] == district)]
-    if row.empty:
-        return jsonify({"error": "No data available"}), 404
+        row = df[(df["State"] == state) & (df["District"] == district)]
+        if row.empty:
+            return jsonify({"error": "No data available"}), 404
 
-    X = row[["ipc", "sll", "ipc_ratio", "sll_ratio", "crime_density"]]
-    X = imputer.transform(X)
-    X = scaler.transform(X)
+        X = row[["ipc", "sll", "ipc_ratio", "sll_ratio", "crime_density"]]
+        X = imputer.transform(X)
+        X = scaler.transform(X)
 
-    pred = model.predict(X)[0]
-    probs = model.predict_proba(X)[0]
+        pred = model.predict(X)[0]
+        probs = model.predict_proba(X)[0]
 
-    risk_level = encoder.inverse_transform([pred])[0]
-    confidence = round(float(max(probs)) * 100, 2)
-    risk_score = round((row["total"].values[0] / max_total) * 100, 2)
+        risk_level = encoder.inverse_transform([pred])[0]
+        confidence = round(float(max(probs)) * 100, 2)
+        risk_score = round((row["total"].values[0] / max_total) * 100, 2)
 
-    color = "green" if risk_level == "Low" else "orange" if risk_level == "Medium" else "red"
+        color = "green" if risk_level == "Low" else "orange" if risk_level == "Medium" else "red"
 
-    return jsonify({
-        "state": state,
-        "district": district,
-        "ipc": int(row["ipc"].values[0]),
-        "sll": int(row["sll"].values[0]),
-        "total": int(row["total"].values[0]),
-        "risk_score": risk_score,
-        "risk_level": risk_level,
-        "confidence": confidence,
-        "color": color,
-        "model": "RandomForestClassifier",
-        "data_updated": "NCRB Portal (2024)"
-    })
+        return jsonify({
+            "state": state,
+            "district": district,
+            "ipc": int(row["ipc"].values[0]),
+            "sll": int(row["sll"].values[0]),
+            "total": int(row["total"].values[0]),
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "confidence": confidence,
+            "color": color,
+            "model": "RandomForestClassifier",
+            "data_updated": "NCRB Portal (12 July 2024)"
+        })
+
+    except Exception as e:
+        return jsonify({"error": "Server error. Please retry."}), 500
+
+# -----------------------------
+# JSON error handlers (CRITICAL)
+# -----------------------------
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({"error": "Too many requests. Please wait."}), 429
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

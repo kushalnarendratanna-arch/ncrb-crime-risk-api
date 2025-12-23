@@ -1,65 +1,141 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
 <title>Child Safety Risk Assessment</title>
 
 <style>
 body {
-    font-family: Arial;
-    background: #0f2027;
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);
     color: #fff;
+}
+
+.container {
+    max-width: 420px;
+    margin: auto;
     padding: 20px;
 }
+
+h1 {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
 select, button {
     width: 100%;
-    padding: 12px;
-    margin: 8px 0;
+    padding: 14px;
+    margin-bottom: 12px;
+    border-radius: 6px;
+    border: none;
+    font-size: 16px;
 }
+
+select {
+    background: #f2f2f2;
+    color: #000;
+}
+
 button {
-    background: orange;
+    background: #ffb300;
     font-weight: bold;
+    cursor: pointer;
 }
+
 .card {
     background: #12232e;
+    border-radius: 10px;
     padding: 15px;
     margin-top: 20px;
-    border-radius: 6px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+}
+
+.risk {
+    margin-top: 10px;
+    line-height: 1.6;
+}
+
+.disclaimer {
+    margin-top: 25px;
+    padding: 15px;
+    border-left: 4px solid #ffb300;
+    background: rgba(0,0,0,0.25);
+    font-size: 14px;
+}
+.footer {
+    text-align: center;
+    margin-top: 10px;
+    font-size: 13px;
+    opacity: 0.8;
 }
 </style>
 </head>
 
 <body>
 
-<h2>Child Safety Risk Assessment</h2>
+<div class="container">
 
-<select id="state"></select>
-<select id="district"></select>
+<h1>Child Safety Risk Assessment</h1>
+
+<select id="state">
+    <option value="">Select State</option>
+</select>
+
+<select id="district">
+    <option value="">Select District</option>
+</select>
 
 <button onclick="checkRisk()">Check Risk</button>
 
-<div id="result" class="card"></div>
+<div id="output"></div>
+
+<div class="disclaimer">
+<b>Legal & Educational Disclaimer:</b><br><br>
+
+• Indian Penal Code (IPC) references are used for historical and dataset consistency.  
+IPC has been officially replaced by <b>Bharatiya Nyaya Sanhita (BNS)</b>, effective from  
+<b>1st July 2024</b>.<br><br>
+
+• This application is developed strictly for <b>educational and academic purposes only</b>.  
+It should <b>not</b> be used for legal, law-enforcement, or decision-making purposes.<br><br>
+
+<b>Developer:</b> Kushal Narendra Tanna<br>
+<b>Email:</b> kushalnarendratanna@gmail.com
+</div>
+
+<div class="footer">
+Data used for training model is open NCRB data.<br>
+Last updated on: <b>12 July 2024</b>
+</div>
+
+</div>
 
 <script>
 const stateSel = document.getElementById("state");
 const districtSel = document.getElementById("district");
-const result = document.getElementById("result");
+const output = document.getElementById("output");
 
 fetch("/states")
-.then(r => r.json())
+.then(res => res.json())
 .then(states => {
-    stateSel.innerHTML = "<option>Select State</option>";
-    states.forEach(s => stateSel.innerHTML += `<option>${s}</option>`);
+    states.forEach(s => {
+        stateSel.innerHTML += `<option value="${s}">${s}</option>`;
+    });
 });
 
-stateSel.onchange = () => {
+stateSel.addEventListener("change", () => {
+    districtSel.innerHTML = "";
     fetch(`/districts?state=${stateSel.value}`)
-    .then(r => r.json())
-    .then(d => {
-        districtSel.innerHTML = "";
-        d.forEach(x => districtSel.innerHTML += `<option>${x}</option>`);
+    .then(res => res.json())
+    .then(districts => {
+        districts.forEach(d => {
+            districtSel.innerHTML += `<option value="${d}">${d}</option>`;
+        });
     });
-};
+});
 
 function checkRisk() {
     fetch("/predict", {
@@ -70,9 +146,10 @@ function checkRisk() {
             district: districtSel.value
         })
     })
-    .then(r => r.json())
+    .then(res => res.json())
     .then(d => {
-        result.innerHTML = `
+        output.innerHTML = `
+        <div class="card risk">
         <b>State:</b> ${d.state}<br>
         <b>District:</b> ${d.district}<br><br>
 
@@ -82,8 +159,14 @@ function checkRisk() {
 
         <b>Risk Level:</b> <span style="color:${d.color}">${d.risk_level}</span><br>
         <b>Risk Score:</b> ${d.risk_score}/100<br>
-        <b>Model Confidence:</b> ${d.confidence}%
+        <b>Model Confidence:</b> ${d.confidence}%<br><br>
+
+        <i>Model: RandomForestClassifier</i>
+        </div>
         `;
+    })
+    .catch(() => {
+        output.innerHTML = "<div class='card'>❌ Server error. Please retry.</div>";
     });
 }
 </script>

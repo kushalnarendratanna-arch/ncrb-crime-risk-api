@@ -2,9 +2,7 @@ from flask import Flask, jsonify, request, render_template
 import pandas as pd
 import joblib
 import os
-
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+import traceback
 
 # -----------------------------
 # App config
@@ -17,12 +15,6 @@ app = Flask(
     template_folder="templates"
 )
 
-limiter = Limiter(
-    get_remote_address,
-    app=app,
-    default_limits=["60 per minute"]
-)
-
 # -----------------------------
 # File paths
 # -----------------------------
@@ -32,25 +24,31 @@ CSV_FILE = os.path.join(BASE_DIR, "NCRB_Crime_Against_Childrens.csv")
 # Globals
 # -----------------------------
 df = None
-LAST_LOADED = 0
+model = encoder = scaler = imputer = max_total = None
 
 # -----------------------------
-# Load ML artifacts
+# Load ML artifacts safely
 # -----------------------------
-model = joblib.load(os.path.join(BASE_DIR, "risk_model.pkl"))
-encoder = joblib.load(os.path.join(BASE_DIR, "risk_encoder.pkl"))
-scaler = joblib.load(os.path.join(BASE_DIR, "scaler.pkl"))
-imputer = joblib.load(os.path.join(BASE_DIR, "imputer.pkl"))
-max_total = joblib.load(os.path.join(BASE_DIR, "max_total.pkl"))
+def load_models():
+    global model, encoder, scaler, imputer, max_total
+    if model is not None:
+        return
+
+    model = joblib.load(os.path.join(BASE_DIR, "risk_model.pkl"))
+    encoder = joblib.load(os.path.join(BASE_DIR, "risk_encoder.pkl"))
+    scaler = joblib.load(os.path.join(BASE_DIR, "scaler.pkl"))
+    imputer = joblib.load(os.path.join(BASE_DIR, "imputer.pkl"))
+    max_total = joblib.load(os.path.join(BASE_DIR, "max_total.pkl"))
+
+    if not max_total or max_total == 0:
+        max_total = 1  # SAFETY FIX
 
 # -----------------------------
-# Load CSV (auto reload)
+# Load CSV
 # -----------------------------
 def load_csv():
-    global df, LAST_LOADED
-
-    mtime = os.path.getmtime(CSV_FILE)
-    if mtime == LAST_LOADED:
+    global df
+    if df is not None:
         return
 
     temp = pd.read_csv(CSV_FILE)
@@ -58,8 +56,8 @@ def load_csv():
     temp.rename(columns={
         "State/UT": "State",
         "State/UT/District": "District",
-        "Total IPC Crimes Against Children - Col. ( 36)": "ipc",
-        "Total SLL Crimes against Children - Col. ( 70)": "sll"
+        "Total IPC Crimes Against Children - Col. ( 36 )": "ipc",
+        "Total SLL Crimes against Children - Col. ( 70 )": "sll"
     }, inplace=True)
 
     temp["ipc"] = pd.to_numeric(temp["ipc"], errors="coerce").fillna(0)
@@ -68,13 +66,9 @@ def load_csv():
     temp["total"] = temp["ipc"] + temp["sll"]
     temp["ipc_ratio"] = temp["ipc"] / (temp["total"] + 1)
     temp["sll_ratio"] = temp["sll"] / (temp["total"] + 1)
-    temp["crime_density"] = (
-        temp["total"] /
-        (temp.groupby("State")["total"].transform("mean") + 1)
-    )
+    temp["crime_density"] = temp["total"] / (temp.groupby("State")["total"].transform("mean") + 1)
 
     df = temp
-    LAST_LOADED = mtime
 
 # -----------------------------
 # Routes
@@ -94,21 +88,23 @@ def districts():
     state = request.args.get("state")
     if not state:
         return jsonify([])
-    districts = df[df["State"] == state]["District"].dropna().unique().tolist()
-    return jsonify(sorted(districts))
+    return jsonify(sorted(df[df["State"] == state]["District"].dropna().unique().tolist()))
 
 @app.route("/predict", methods=["POST"])
-@limiter.limit("10 per minute")
 def predict():
     try:
+        load_models()
         load_csv()
-        data = request.get_json(force=True)
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Invalid request"}), 400
 
         state = data.get("state")
         district = data.get("district")
 
         if not state or not district:
-            return jsonify({"error": "Invalid input"}), 400
+            return jsonify({"error": "State and district required"}), 400
 
         row = df[(df["State"] == state) & (df["District"] == district)]
         if row.empty:
@@ -119,10 +115,10 @@ def predict():
         X = scaler.transform(X)
 
         pred = model.predict(X)[0]
-        probs = model.predict_proba(X)[0]
+        prob = model.predict_proba(X)[0]
 
         risk_level = encoder.inverse_transform([pred])[0]
-        confidence = round(float(max(probs)) * 100, 2)
+        confidence = round(float(max(prob)) * 100, 2)
         risk_score = round((row["total"].values[0] / max_total) * 100, 2)
 
         color = "green" if risk_level == "Low" else "orange" if risk_level == "Medium" else "red"
@@ -136,16 +132,14 @@ def predict():
             "risk_score": risk_score,
             "risk_level": risk_level,
             "confidence": confidence,
-            "color": color,
-            "model": "RandomForestClassifier",
-            "data_updated": "NCRB Portal (12 July 2024)"
+            "color": color
         })
 
     except Exception as e:
-        return jsonify({"error": "Server error. Please retry."}), 500
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e)
+        }), 500
 
-# -----------------------------
-# Run
-# -----------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

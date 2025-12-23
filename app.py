@@ -6,9 +6,6 @@ import os
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-# -----------------------------
-# App config
-# -----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -19,23 +16,17 @@ limiter = Limiter(
     default_limits=["60 per minute"]
 )
 
-# -----------------------------
-# Paths
-# -----------------------------
 CSV_FILE = os.path.join(BASE_DIR, "NCRB_Crime_Against_Childrens.csv")
 
+# ✅ Load ONLY stable artifacts
 model = joblib.load(os.path.join(BASE_DIR, "risk_model.pkl"))
 encoder = joblib.load(os.path.join(BASE_DIR, "risk_encoder.pkl"))
 scaler = joblib.load(os.path.join(BASE_DIR, "scaler.pkl"))
-imputer = joblib.load(os.path.join(BASE_DIR, "imputer.pkl"))
 max_total = joblib.load(os.path.join(BASE_DIR, "max_total.pkl"))
 
 df = None
 LAST_LOADED = 0
 
-# -----------------------------
-# Load CSV safely
-# -----------------------------
 def load_csv():
     global df, LAST_LOADED
 
@@ -66,9 +57,6 @@ def load_csv():
     df = temp
     LAST_LOADED = mtime
 
-# -----------------------------
-# Routes
-# -----------------------------
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -82,11 +70,9 @@ def states():
 def districts():
     load_csv()
     state = request.args.get("state", "")
-    if not state:
-        return jsonify([])
-
-    districts = df[df["State"] == state]["District"].dropna().unique().tolist()
-    return jsonify(sorted(districts))
+    return jsonify(sorted(
+        df[df["State"] == state]["District"].dropna().unique().tolist()
+    ))
 
 @app.route("/predict", methods=["POST"])
 @limiter.limit("10 per minute")
@@ -103,29 +89,24 @@ def predict():
             return jsonify({"error": "No data available"}), 404
 
         X = row[["ipc", "sll", "ipc_ratio", "sll_ratio", "crime_density"]]
-        X = imputer.transform(X)
+        X = X.fillna(0)  # ✅ SAFE IMPUTATION
         X = scaler.transform(X)
 
         pred = model.predict(X)[0]
-        probs = model.predict_proba(X)[0]
+        prob = model.predict_proba(X)[0]
 
         risk_level = encoder.inverse_transform([pred])[0]
-        confidence = round(float(max(probs)) * 100, 2)
+        confidence = round(float(max(prob)) * 100, 2)
         risk_score = round((row["total"].values[0] / max_total) * 100, 2)
 
         color = "green" if risk_level == "Low" else "orange" if risk_level == "Medium" else "red"
 
         return jsonify({
-            "state": state,
-            "district": district,
-            "ipc": int(row["ipc"].values[0]),
-            "sll": int(row["sll"].values[0]),
-            "total": int(row["total"].values[0]),
-            "risk_score": risk_score,
             "risk_level": risk_level,
             "confidence": confidence,
+            "risk_score": risk_score,
+            "total": int(row["total"].values[0]),
             "color": color,
-            "model": "RandomForestClassifier",
             "data_updated": "12 July 2024"
         })
 

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Child Safety Risk Assessment</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+
+<div class="card">
+  <h3>Child Safety Risk Assessment</h3>
+
+  <select id="state">
+    <option value="">Loading states...</option>
+  </select>
+
+  <input id="search" placeholder="Search district">
+
+  <select id="district">
+    <option value="">Select District</option>
+  </select>
+
+  <button onclick="checkRisk()">Check Risk</button>
+
+  <div id="result"></div>
+
+  <div class="disclaimer">
+    ⚠️ <b>Disclaimer:</b> This tool is for educational and awareness purposes only.
+    Predictions are based on historical NCRB data and do not represent real-time crime risk.
+    <br><br>
+    © 2025 | Developed by <b>Kushal Narendra Tanna</b><br>
+    Data Source: NCRB (Government of India)
+  </div>
+</div>
+
+<script>
+let allDistricts = [];
+
+fetch("/states")
+.then(r => r.json())
+.then(states => {
+  let s = document.getElementById("state");
+  s.innerHTML = "<option value=''>Select State</option>";
+  states.forEach(x => {
+    s.innerHTML += `<option value="${x}">${x}</option>`;
+  });
+});
+
+document.getElementById("state").onchange = function () {
+  if (!this.value) return;
+  fetch(`/districts?state=${encodeURIComponent(this.value)}`)
+    .then(r => r.json())
+    .then(d => {
+      allDistricts = d;
+      renderDistricts(d);
+    });
+};
+
+document.getElementById("search").oninput = function () {
+  let q = this.value.toLowerCase();
+  renderDistricts(allDistricts.filter(x => x.toLowerCase().includes(q)));
+};
+
+function renderDistricts(list) {
+  let d = document.getElementById("district");
+  d.innerHTML = "<option value=''>Select District</option>";
+  list.forEach(x => {
+    d.innerHTML += `<option value="${x}">${x}</option>`;
+  });
+}
+
+function checkRisk() {
+  let state = document.getElementById("state").value;
+  let district = document.getElementById("district").value;
+  let result = document.getElementById("result");
+
+  if (!state || !district) {
+    result.innerHTML = "⚠️ Please select both state and district.";
+    return;
+  }
+
+  result.innerHTML = "⏳ Calculating risk...";
+
+  fetch("/predict", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state, district })
+  })
+  .then(async r => {
+    let data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Request failed");
+    return data;
+  })
+  .then(j => {
+    result.innerHTML = `
+      <b>State:</b> ${j.state}<br>
+      <b>District:</b> ${j.district}<br><br>
+      <b>IPC Crimes:</b> ${j.ipc}<br>
+      <b>SLL Crimes:</b> ${j.sll}<br>
+      <b>Total Crimes:</b> ${j.total}<br><br>
+      <b>Risk Level:</b>
+      <span style="color:${j.color};font-weight:bold">${j.risk_level}</span><br>
+      <b>Risk Score:</b> ${j.risk_score}/100<br>
+      <b>Confidence:</b> ${j.confidence}%<br>
+    `;
+  })
+  .catch(err => {
+    result.innerHTML = "❌ " + err.message;
+  });
+}
+</script>
+
+</body>
+</html>

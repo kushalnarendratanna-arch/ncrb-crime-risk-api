@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Child Crime Risk Assessment</title>
+
+<style>
+body { font-family: Arial; background: #f5f5f5; padding: 20px; }
+select, button { padding: 10px; margin: 5px; width: 100%; }
+#result { margin-top: 20px; padding: 15px; background: #fff; border-radius: 5px; }
+footer { font-size: 13px; margin-top: 40px; color: #333; }
+</style>
+</head>
+
+<body>
+
+<h2>Child Crime Risk Assessment (India)</h2>
+
+<select id="state">
+<option value="">Select State</option>
+</select>
+
+<select id="district">
+<option value="">Select District</option>
+</select>
+
+<button onclick="calculateRisk()">Calculate Risk</button>
+
+<div id="result"></div>
+
+<footer>
+<hr>
+<b>Legal & Educational Disclaimer:</b><br>
+• Indian Penal Code (IPC) references are used for historical and dataset consistency.  
+IPC has been officially replaced by <b>Bharatiya Nyaya Sanhita (BNS)</b>, effective from  
+<b>1st July 2024</b>.<br><br>
+
+• This application is developed strictly for <b>educational and academic purposes only</b>.  
+It should <b>not</b> be used for legal, law-enforcement, or decision-making purposes.<br><br>
+
+<b>Developer:</b> Kushal Narendra Tanna<br>
+<b>Email:</b> kushalnarendratanna@gmail.com<br><br>
+
+© 2024 Kushal Narendra Tanna. All rights reserved.<br>
+Dataset last updated: <b>12 July 2024</b>
+</footer>
+
+<script>
+const stateSelect = document.getElementById("state");
+const districtSelect = document.getElementById("district");
+const resultDiv = document.getElementById("result");
+
+fetch("/states")
+.then(res => res.json())
+.then(states => {
+    states.forEach(s => {
+        let opt = document.createElement("option");
+        opt.value = s;
+        opt.textContent = s;
+        stateSelect.appendChild(opt);
+    });
+});
+
+stateSelect.addEventListener("change", () => {
+    districtSelect.innerHTML = '<option value="">Select District</option>';
+    fetch(`/districts?state=${stateSelect.value}`)
+    .then(res => res.json())
+    .then(districts => {
+        districts.forEach(d => {
+            let opt = document.createElement("option");
+            opt.value = d;
+            opt.textContent = d;
+            districtSelect.appendChild(opt);
+        });
+    });
+});
+
+function calculateRisk() {
+    resultDiv.innerHTML = "Calculating...";
+    fetch("/predict", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            state: stateSelect.value,
+            district: districtSelect.value
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.error) {
+            resultDiv.innerHTML = "❌ " + data.error;
+            return;
+        }
+        resultDiv.innerHTML = `
+        <b>Risk Level:</b> <span style="color:${data.color}">${data.risk_level}</span><br>
+        <b>Confidence:</b> ${data.confidence}%<br>
+        <b>Risk Score:</b> ${data.risk_score}<br>
+        <b>Total Crimes:</b> ${data.total}
+        `;
+    })
+    .catch(() => {
+        resultDiv.innerHTML = "❌ Server error. Please retry.";
+    });
+}
+</script>
+
+</body>
+</html>

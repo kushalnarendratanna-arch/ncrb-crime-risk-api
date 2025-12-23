@@ -2,125 +2,89 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Child Crime Risk Assessment</title>
+<title>Child Safety Risk Assessment</title>
 
 <style>
 body {
     font-family: Arial;
-    background: #f2f2f2;
+    background: #0f2027;
+    color: #fff;
     padding: 20px;
-    color: #000;
 }
-
 select, button {
     width: 100%;
     padding: 12px;
     margin: 8px 0;
-    background: #ffffff;
-    color: #000;
-    border: 2px solid #333;
-    border-radius: 4px;
 }
-
 button {
-    background: #1976d2;
-    color: #fff;
+    background: orange;
     font-weight: bold;
 }
-
-#result {
-    margin-top: 20px;
+.card {
+    background: #12232e;
     padding: 15px;
-    background: #ffffff;
-    border: 2px solid #333;
-}
-
-footer {
-    margin-top: 40px;
-    font-size: 13px;
+    margin-top: 20px;
+    border-radius: 6px;
 }
 </style>
 </head>
 
 <body>
 
-<h2>Child Crime Risk Assessment (India)</h2>
+<h2>Child Safety Risk Assessment</h2>
 
-<select id="state">
-<option value="">Select State</option>
-</select>
+<select id="state"></select>
+<select id="district"></select>
 
-<select id="district">
-<option value="">Select District</option>
-</select>
+<button onclick="checkRisk()">Check Risk</button>
 
-<button onclick="calculateRisk()">Calculate Risk</button>
-
-<div id="result"></div>
-
-<footer>
-<hr>
-<b>Legal & Educational Disclaimer:</b><br>
-• IPC references are for historical dataset consistency only.<br>
-• IPC replaced by <b>Bharatiya Nyaya Sanhita (BNS)</b> from <b>1 July 2024</b>.<br><br>
-
-<b>Educational use only. Not for legal decisions.</b><br><br>
-
-<b>Developer:</b> Kushal Narendra Tanna<br>
-<b>Email:</b> kushalnarendratanna@gmail.com<br><br>
-
-© 2024 Kushal Narendra Tanna<br>
-Dataset updated: <b>12 July 2024</b>
-</footer>
+<div id="result" class="card"></div>
 
 <script>
-const state = document.getElementById("state");
-const district = document.getElementById("district");
+const stateSel = document.getElementById("state");
+const districtSel = document.getElementById("district");
 const result = document.getElementById("result");
 
 fetch("/states")
 .then(r => r.json())
-.then(data => data.forEach(s => {
-    let o = document.createElement("option");
-    o.value = s; o.text = s;
-    state.add(o);
-}));
+.then(states => {
+    stateSel.innerHTML = "<option>Select State</option>";
+    states.forEach(s => stateSel.innerHTML += `<option>${s}</option>`);
+});
 
-state.onchange = () => {
-    district.innerHTML = '<option value="">Select District</option>';
-    fetch(`/districts?state=${state.value}`)
+stateSel.onchange = () => {
+    fetch(`/districts?state=${stateSel.value}`)
     .then(r => r.json())
-    .then(data => data.forEach(d => {
-        let o = document.createElement("option");
-        o.value = d; o.text = d;
-        district.add(o);
-    }));
+    .then(d => {
+        districtSel.innerHTML = "";
+        d.forEach(x => districtSel.innerHTML += `<option>${x}</option>`);
+    });
 };
 
-function calculateRisk() {
-    result.innerHTML = "Calculating...";
+function checkRisk() {
     fetch("/predict", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-            state: state.value,
-            district: district.value
+            state: stateSel.value,
+            district: districtSel.value
         })
     })
     .then(r => r.json())
     .then(d => {
-        if (d.error) {
-            result.innerHTML = "❌ " + d.error;
-            return;
-        }
         result.innerHTML = `
+        <b>State:</b> ${d.state}<br>
+        <b>District:</b> ${d.district}<br><br>
+
+        <b>IPC Crimes:</b> ${d.ipc}<br>
+        <b>SLL Crimes:</b> ${d.sll}<br>
+        <b>Total Crimes:</b> ${d.total}<br><br>
+
         <b>Risk Level:</b> <span style="color:${d.color}">${d.risk_level}</span><br>
-        <b>Confidence:</b> ${d.confidence}%<br>
-        <b>Risk Score:</b> ${d.risk_score}<br>
-        <b>Total Crimes:</b> ${d.total}
+        <b>Risk Score:</b> ${d.risk_score}/100<br>
+        <b>Model Confidence:</b> ${d.confidence}%
         `;
-    })
-    .catch(() => result.innerHTML = "❌ Server error");
+    });
 }
 </script>
 
